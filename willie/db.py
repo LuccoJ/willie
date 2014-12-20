@@ -574,6 +574,7 @@ class Table(object):
         db = self.db.connect()
         cur = db.cursor()
         where = self._make_where_statement(key, row)
+        print('SELECT ' + value + ' FROM ' + self.name + ' WHERE ' + where)
         cur.execute(
             'SELECT ' + value + ' FROM ' + self.name + ' WHERE ' + where, row)
         result = cur.fetchone()

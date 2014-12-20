@@ -155,7 +155,7 @@ def ytsearch(bot, trigger):
     bot.say(HTMLParser().unescape(message))
 
 
-@rule('.*(youtube.com/watch\S*v=|youtu.be/)([\w-]+).*')
+#@rule('.*(youtube.com/watch\S*v=|youtu.be/)([\w-]+).*')
 def ytinfo(bot, trigger, found_match=None):
     """
     Get information about the latest video uploaded by the channel provided.

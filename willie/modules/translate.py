@@ -1,224 +1,172 @@
-# coding=utf8
+#!/usr/bin/env python
+# coding=utf-8
 """
-translate.py - Willie Translation Module
-Copyright 2008, Sean B. Palmer, inamidst.com
-Copyright © 2013-2014, Elad Alfassa <elad@fedoraproject.org>
+apertium.py - Phenny Apertium Module
+Copyright 2013, Lorenzo J. Lucchini, ljlbox@tiscali.it
 Licensed under the Eiffel Forum License 2.
 
-http://willie.dftba.net
+http://languagemodules.sourceforge.net/
 """
-from __future__ import unicode_literals
-from willie import web
-from willie.module import rule, commands, priority, example
-import json
-import sys
-import random
-import os
-mangle_lines = {}
-if sys.version_info.major >= 3:
-    unicode = str
+
+import re, urllib
+import willie.web as web
+import subprocess
+import willie.natlang as lang
+import willie.pastebin as pastebin
+import re
+import willie.utils as utils
 
 
-def configure(config):
-    """
+def translation(phenny, input):
+   '''Translate a sentence from a language into another, using various engines.'''
+   if not input.group(2):
+      phenny.reply("Give me some input! Like '<l1 >l2 text'. I could translate... nothing, but why would I?")
+      return
 
-    | [translate] | example | purpose |
-    | ---- | ------- | ------- |
-    | research | True | Enable research mode (logging) for .mangle |
-    | collect_mangle_lines | False | Collect mangle lines to allow .mangle the last message in the channel |
-    """
-    if config.option('Configure mangle module', False):
-        config.add_section('translate')
-        if config.option("Enable research mode"):
-            config.translate.research = True
-        if config.option("Collect mangle lines"):
-            config.translate.collect_mangle_lines = True
+   if input.group(2) == "romanization corrections":
+      phenny.reply("\x02LjL\x02 to \x02English\x02:  Hello there!")
+      return
 
+   text, (lang1, lang2) = lang.args(input.sender, input.group(2), count=2)
 
-def translate(text, in_lang='auto', out_lang='en'):
-    raw = False
-    if unicode(out_lang).endswith('-raw'):
-        out_lang = out_lang[:-4]
-        raw = True
+   lang1, lang2 = lang.guess_translation_languages(text, lang1, lang2)
+   outputs = lang.translate(text, lang1, lang2)
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0' +
-        '(X11; U; Linux i686)' +
-        'Gecko/20071127 Firefox/2.0.0.11'
-    }
+   print outputs
 
-    url_query = {
-        "client": "t",
-        "sl": in_lang,
-        "tl": out_lang,
-        "q": text,
-    }
-    query_string = "&".join(
-        "{key}={value}".format(key=key, value=value)
-        for key, value in url_query.items()
-    )
-    url = "http://translate.google.com/translate_a/t?{query}".format(query=query_string)
-    result = web.get(url, timeout=40, headers=headers)
+   before = "\x02%s\x02 to \x02%s\x02 translation:  " % (lang.langcode(lang1, 'name'), lang.langcode(lang2, 'name'))
+   if outputs:
+      formatted = ["%s (%s)" % (text, engine) if engine != 'suggestion' else "Maybe you meant \"%s\"?" % text for engine, text in outputs]
+      utils.message(phenny, input, before, formatted, sep=u' — ')
+   else:
+      utils.message(phenny, input, before, "No engine could successfully translate that.")
 
-    while ',,' in result:
-        result = result.replace(',,', ',null,')
-        result = result.replace('[,', '[null,')
-
-    data = json.loads(result)
-
-    if raw:
-        return str(data), 'en-raw'
-
-    try:
-        language = data[2]  # -2][0][0]
-    except:
-        language = '?'
-
-    return ''.join(x[0] for x in data[0]), language
+translation.commands = ['translation', 'translate', 'tr']
+translation.example = u'tr <it >en Ciao, come va?'
+translation.response = u'\x02Italian\x02 to \x02English\x02 translation:  Hello , how are you? (Google) — Ciao, how it goes? (Apertium)'
+translation.thread = True
+translation.exposed = True
 
 
-@rule(u'$nickname[,:]\s+(?:([a-z]{2}) +)?(?:([a-z]{2}|en-raw) +)?["“](.+?)["”]\? *$')
-@example('$nickname: "mon chien"? or $nickname: fr "mon chien"?')
-@priority('low')
-def tr(bot, trigger):
-    """Translates a phrase, with an optional language hint."""
-    in_lang, out_lang, phrase = trigger.groups()
+def transliteration(phenny, input):
+   '''Translate a sentence from a language into another, using various engines.'''
+   if not input.group(2):
+      phenny.reply("Give me some input! Like '<l1 >l2 text'. I'm supposed to transliterate something containing letters, or the like.")
+      return
 
-    if (len(phrase) > 350) and (not trigger.admin):
-        return bot.reply('Phrase must be under 350 characters.')
+   text, (lang1, lang2) = lang.args(input.sender, input.group(2), count=2)
 
-    in_lang = in_lang or 'auto'
-    out_lang = out_lang or 'en'
+   lang1, lang2 = lang.guess_translation_languages(text, lang1, lang2, fixed=True)
+   outputs = lang.translate(text, lang1, lang2, transliterate=True)
 
-    if in_lang != out_lang:
-        msg, in_lang = translate(phrase, in_lang, out_lang)
-        if sys.version_info.major < 3 and isinstance(msg, str):
-            msg = msg.decode('utf-8')
-        if msg:
-            msg = web.decode(msg)  # msg.replace('&#39;', "'")
-            msg = '"%s" (%s to %s, translate.google.com)' % (msg, in_lang, out_lang)
-        else:
-            msg = 'The %s to %s translation failed, sorry!' % (in_lang, out_lang)
+   print outputs
 
-        bot.reply(msg)
-    else:
-        bot.reply('Language guessing failed, so try suggesting one!')
+   before = "\x02%s\x02 to \x02%s\x02 transliteration: " % (lang.langcode(lang1, 'name', passthru=True), lang.langcode(lang2, 'name', passthru=True))
+   if outputs:
+      formatted = ["%s (%s)" % (text, engine) if engine != 'suggestion' else "Maybe you meant \"%s\"?" % text for engine, text in outputs]
+      utils.message(phenny, input, before, formatted, sep=u' — ')
+   else:
+      utils.message(phenny, input, before, "No engine could successfully transliterate that.")
 
-
-@commands('translate', 'tr')
-@example('.tr :en :fr my dog', '"mon chien" (en to fr, translate.google.com)')
-@example('.tr היי', '"Hi" (iw to en, translate.google.com)')
-@example('.tr mon chien', '"my dog" (fr to en, translate.google.com)')
-def tr2(bot, trigger):
-    """Translates a phrase, with an optional language hint."""
-    command = trigger.group(2)
-
-    if not command:
-        return bot.reply('You did not give me anything to translate')
-
-    def langcode(p):
-        return p.startswith(':') and (2 < len(p) < 10) and p[1:].isalpha()
-
-    args = ['auto', 'en']
-
-    for i in range(2):
-        if ' ' not in command:
-            break
-        prefix, cmd = command.split(' ', 1)
-        if langcode(prefix):
-            args[i] = prefix[1:]
-            command = cmd
-    phrase = command
-
-    if (len(phrase) > 350) and (not trigger.admin):
-        return bot.reply('Phrase must be under 350 characters.')
-
-    src, dest = args
-    if src != dest:
-        msg, src = translate(phrase, src, dest)
-        if sys.version_info.major < 3 and isinstance(msg, str):
-            msg = msg.decode('utf-8')
-        if msg:
-            msg = web.decode(msg)  # msg.replace('&#39;', "'")
-            msg = '"%s" (%s to %s, translate.google.com)' % (msg, src, dest)
-        else:
-            msg = 'The %s to %s translation failed, sorry!' % (src, dest)
-
-        bot.reply(msg)
-    else:
-        bot.reply('Language guessing failed, so try suggesting one!')
+transliteration.commands = ['transliteration', 'transliterate', 'tl']
+transliteration.example = u'tl <hi >ja नमस्ते'
+transliteration.response = u'\x02Hindi\x02 to \x02Japanese\x02 transliteration:  ナマステー (UConv) — Namaste (Google) — Maybe you meant "नमस्ते!"?'
+transliteration.thread = True
+transliteration.exposed = True
 
 
-def get_random_lang(long_list, short_list):
-    random_index = random.randint(0, len(long_list) - 1)
-    random_lang = long_list[random_index]
-    if random_lang not in short_list:
-        short_list.append(random_lang)
-    else:
-        return get_random_lang(long_list, short_list)
-    return short_list
+def romanization(phenny, input):
+   '''Transliterate a sentence into Latin characters, or from Latin characters into another writing system.'''
+   if not input.group(2):
+      phenny.reply("Give me some input! Like '<language text'")
+      return
+
+   text, language = lang.args(input.sender, input.group(2), count=1)
+
+   lang1, lang2 = lang.guess_translation_languages(text, language, None, fixed=True)
+
+   output, language_hint, suggestion = lang.googletranslate(text, lang1, lang2, romanize=True)
+   if suggestion:
+      if not output or output.lower() == text.lower(): output = suggestion
+      else: output += u" — But maybe you meant: %s" % suggestion
+
+   phenny.reply("\x02%s\x02 romanization:  %s" % (lang.langcode(lang1 if lang1 else language_hint, 'name'), output))
+
+romanization.commands = ['romanization', 'romanize', 'romanisation', 'romanise', 'ro']
+romanization.example = u'ro <ja 私'
+romanization.response = '\x02Japanese\x02 romanization:  Watashi'
+romanization.thread = True
+romanization.exposed = True
 
 
-@commands('mangle', 'mangle2')
-def mangle(bot, trigger):
-    """Repeatedly translate the input until it makes absolutely no sense."""
-    global mangle_lines
-    long_lang_list = ['fr', 'de', 'es', 'it', 'no', 'he', 'la', 'ja', 'cy', 'ar', 'yi', 'zh', 'nl', 'ru', 'fi', 'hi', 'af', 'jw', 'mr', 'ceb', 'cs', 'ga', 'sv', 'eo', 'el', 'ms', 'lv']
-    lang_list = []
-    for __ in range(0, 8):
-        lang_list = get_random_lang(long_lang_list, lang_list)
-    random.shuffle(lang_list)
-    if trigger.group(2) is None:
-        try:
-            phrase = (mangle_lines[trigger.sender.lower()], '')
-        except:
-            bot.reply("What do you want me to mangle?")
-            return
-    else:
-        phrase = (trigger.group(2).strip(), '')
-    if phrase[0] == '':
-        bot.reply("What do you want me to mangle?")
-        return
-    if bot.config.has_section('translate') and bot.config.translate.research:
-        research_logfile = open(os.path.join(bot.config.logdir, 'mangle.log'), 'a')
-        research_logfile.write('Phrase: %s\n' % str(phrase))
-        research_logfile.write('Lang_list: %s\n' % lang_list)
-    for lang in lang_list:
-        backup = phrase
-        try:
-            phrase = translate(phrase[0], 'en', lang)
-        except:
-            phrase = False
-        if not phrase:
-            phrase = backup
-            break
+def apertium(phenny, input): 
+   '''Attempts to translate a given piece of text from one language into another using Apertium'''
+   if not input.group(2):
+      phenny.reply("Give me some input! Like '<l1 >l2 text'")
+      return
 
-        try:
-            phrase = translate(phrase[0], lang, 'en')
-        except:
-            phrase = backup
-            continue
+   text, (lang1, lang2) = lang.args(input.sender, input.group(2), count=2)
 
-        if bot.config.has_section('translate') and bot.config.translate.research:
-            research_logfile.write('-> %s\n' % str(phrase))
-        if not phrase:
-            phrase = backup
-            break
-    if bot.config.has_section('translate') and bot.config.translate.research:
-        research_logfile.write('->[FINAL] %s\n' % str(phrase))
-        research_logfile.write('----------------------------\n\n\n')
-        research_logfile.close()
-    bot.reply(phrase[0])
+   print lang1, lang2
 
+   if lang1 and not lang.langcode(lang1):
+      mode, correct_mode = lang1, True
+   else:
+      lang1, lang2 = lang.guess_translation_languages(text, lang1, lang2)
+      mode, correct_mode = lang.apertium_mode(lang1, lang2)
 
-@rule('(.*)')
-@priority('low')
-def collect_mangle_lines(bot, trigger):
-    if bot.config.has_section('translate') and bot.config.translate.collect_mangle_lines:
-        global mangle_lines
-        mangle_lines[trigger.sender.lower()] = "%s said '%s'" % (trigger.nick, (trigger.group(0).strip()))
+   if text.startswith("http://"):
+      format = 'html'
+      url = text.strip().split(" ")[0]
+      try:
+         text = web.get(url)
+      except Exception:
+         phenny.reply("Could not get the URL '%s'" % url)
+         return
+   else:
+      format = 'txt'
+
+   try:
+      response = lang.apertium(text, mode, "/usr/local/share/apertium", format=format, timeout=20)
+   except NotImplementedError as e:
+      phenny.reply(str(e))
+      return
+
+   if len(response)>350 or "\n" in response.strip():
+      try:
+         response = pastebin.paste(response, 'Apertium translation using mode %s' % mode, 'xml')
+      except IOError:
+         response = response[:350] + "[...]"
+
+   if lang1: lang1 = lang.langcode(lang1, 'name')
+   if lang2: lang2 = lang.langcode(lang2, 'name')
+
+   phenny.reply(u"%s (%s to %s%s, %s mode used)" % (response, lang1, lang2, " not available" if not correct_mode else "", mode))
+
+apertium.commands = ['apertium', 'ap']
+apertium.thread = True
+apertium.priority = 'low'
+apertium.example = 'ap :en :es The quick brown fox jumps over the lazy dog.'
+apertium.response = u'El zorro marrón rápido salta el perro perezoso. (English to Spanish, en-es mode used)'
 
 
-if __name__ == "__main__":
-    from willie.test_tools import run_example_tests
-    run_example_tests(__file__)
+def apertiumlist(phenny, input):
+   '''Lists all language pair in Apertium, or all language pairs containing the specified language.'''
+   if input.group(2):
+      list = lang.apertium_list(input.group(2))
+      verbose = True
+   else:
+      list = lang.apertium_list()
+      verbose = False
+
+   if list is None:
+      phenny.reply("List has not yet been populated, please wait...")
+      return
+
+   phenny.reply(", ".join([element for element in list if len(element)<=6 or verbose]))
+
+apertiumlist.commands = ['apertiumlist', 'al']
+apertium.thread = True
+apertiumlist.priority = 'low'
+apertiumlist.example = 'al it-en'
+apertiumlist.response = 'it-en, it-en-anmor, it-en-chunker, it-en-generador, it-en-interchunk, it-en-latin1, it-en-lextor, it-en-multi, it-en-postchunk, it-en-pretransfer, it-en-tagger, it-en_US, it-en_US-generador, test-it-en, test-it-en-anmor, test-it-en-chunker, test-it-en-generador, test-it-en-interchunk, test-it-en-postchunk, test-it-en-pretransfer, test-it-en-tagger'

@@ -138,8 +138,8 @@ def title_auto(bot, trigger):
     for title, domain in results[:4]:
         message = '[ %s ] - %s' % (title, domain)
         # Guard against responding to other instances of this bot.
-        if message != trigger:
-            bot.say(message)
+#        if message != trigger:
+#            bot.say(message)
 
 
 def process_urls(bot, trigger, urls):
